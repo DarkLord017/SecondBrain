@@ -5,7 +5,7 @@ System Design
 ## Running locally
 
 1. `docker compose up -d` — starts Postgres, Redis, and Neo4j.
-2. `cp .env.example .env` and fill in `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` (verify the current model id against [Anthropic's docs](https://docs.anthropic.com/en/docs/about-claude/models)), `SUPERMEMORY_API_KEY`, and `LLAMAPARSE_API_KEY`.
+2. `cp .env.example .env` and fill in `OPENAI_API_KEY` (an OpenRouter key by default — `OPENAI_API_BASE_URL` points there unless you override it), `LLM_MODEL` (an OpenRouter-style slug, e.g. `anthropic/claude-sonnet-4.5`), `SUPERMEMORY_API_KEY`, and `LLAMAPARSE_API_KEY`.
 3. `python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"` (requires `libmagic` — `brew install libmagic` on macOS).
 4. `uvicorn secondbrain.main:app --reload`
 

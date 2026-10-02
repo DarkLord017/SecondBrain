@@ -1,41 +1,51 @@
-import json
-
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from secondbrain.config import settings
 
-_model: ChatAnthropic | None = None
+_model: ChatOpenAI | None = None
 
 
-def get_chat_model() -> ChatAnthropic:
+class Idea(BaseModel):
+    id: str = Field(description="kebab-case slug, unique within this response")
+    label: str = Field(description="short name")
+    summary: str = Field(description="one sentence")
+    related_to: list[str] = Field(
+        default_factory=list, description="ids of other items in this same list that it relates to"
+    )
+
+
+class IdeaExtraction(BaseModel):
+    ideas: list[Idea] = Field(default_factory=list, max_length=8)
+
+
+def get_chat_model() -> ChatOpenAI:
     global _model
     if _model is None:
-        if not settings.anthropic_model:
+        if not settings.llm_model:
             raise RuntimeError(
-                "ANTHROPIC_MODEL is not set — verify the current model id against "
-                "https://docs.anthropic.com/en/docs/about-claude/models and set it in .env"
+                "LLM_MODEL is not set — set an OpenRouter-style model slug "
+                "(e.g. anthropic/claude-sonnet-4.5) in .env"
             )
-        _model = ChatAnthropic(
-            model=settings.anthropic_model, api_key=settings.anthropic_api_key
+        _model = ChatOpenAI(
+            model=settings.llm_model,
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_api_base_url,
         )
     return _model
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=4), reraise=True)
 async def extract_ideas(text: str) -> list[dict]:
     """Pull key concepts from parsed document text for the Neo4j idea graph.
 
     Returns [{"id": str, "label": str, "summary": str, "related_to": [id, ...]}].
     """
-    model = get_chat_model()
+    model = get_chat_model().with_structured_output(IdeaExtraction)
     prompt = (
-        "Extract at most 8 distinct key concepts/ideas from the following text. "
-        "Respond with ONLY a JSON array, no prose, each item shaped as "
-        '{"id": "<kebab-case-slug>", "label": "<short name>", "summary": "<one sentence>", '
-        '"related_to": ["<id of another item in this same array that it relates to>", ...]}.'
-        f"\n\nText:\n{text[:8000]}"
+        "Extract at most 8 distinct key concepts/ideas from the following text.\n\n"
+        f"Text:\n{text[:8000]}"
     )
-    resp = await model.ainvoke(prompt)
-    try:
-        return json.loads(resp.content)
-    except (json.JSONDecodeError, TypeError):
-        return []
+    result: IdeaExtraction = await model.ainvoke(prompt)
+    return [idea.model_dump() for idea in result.ideas]

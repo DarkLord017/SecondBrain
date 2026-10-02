@@ -21,7 +21,7 @@ async def _sync_notebook(notebook_id: str, title: str, owner_user_id: str) -> No
         tg.create_task(
             write_memory(
                 content=f"Notebook created: {title}",
-                container_tags=[f"user:{owner_user_id}", f"notebook:{notebook_id}"],
+                container_tag=f"notebook:{notebook_id}",
                 metadata={"type": "notebook_profile", "title": title, "owner_user_id": owner_user_id},
             )
         )

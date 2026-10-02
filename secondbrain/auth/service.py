@@ -22,7 +22,7 @@ async def _sync_profile(user_id: str, email: str) -> None:
         tg.create_task(
             write_memory(
                 content=f"User profile: {email}",
-                container_tags=[f"user:{user_id}"],
+                container_tag=f"user:{user_id}",
                 metadata={"type": "user_profile", "email": email},
             )
         )

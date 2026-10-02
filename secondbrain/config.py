@@ -4,8 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    anthropic_api_key: str = ""
-    anthropic_model: str = ""
+    openai_api_key: str = ""
+    openai_api_base_url: str = "https://openrouter.ai/api/v1"
+    llm_model: str = ""
 
     supermemory_api_key: str = ""
     supermemory_base_url: str = "https://api.supermemory.ai"
