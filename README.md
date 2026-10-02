@@ -1,3 +1,4 @@
 System Design
 
-<img width="1200" height="688" alt="Screenshot 2026-10-02 at 4 59 55 PM" src="https://github.com/user-attachments/assets/ce501b6d-57ec-4d29-b0f7-a26db6aede29" />
+<img width="3640" height="2420" alt="image" src="https://github.com/user-attachments/assets/2368a021-6673-4169-a298-6e0315c00593" />
+
