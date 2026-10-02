@@ -27,6 +27,7 @@ dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.21", "ruff>=0.7", "faker
 
 [tool.setuptools.packages.find]
 include = ["secondbrain*"]
+exclude = ["*.tests", "*.tests.*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
