@@ -13,8 +13,6 @@ import httpx
 from secondbrain.config import settings
 
 BASE_URL = "https://api.cloud.llamaindex.ai/api/v1/parsing"
-
-
 async def parse_handwritten_to_markdown(raw: bytes, filename: str) -> str:
     headers = {"Authorization": f"Bearer {settings.llamaparse_api_key}"}
     async with httpx.AsyncClient(base_url=BASE_URL, headers=headers, timeout=60.0) as c:

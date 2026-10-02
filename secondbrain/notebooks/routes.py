@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from secondbrain.integrations.supermemory_client import write_memory
+from secondbrain.notebooks import service
 from secondbrain.notebooks.schemas import CreateNotebookRequest, NotebookOut
-from secondbrain.storage import graph as graph_store
 from secondbrain.storage import notebooks as notebooks_store
 
 router = APIRouter(prefix="/notebooks", tags=["notebooks"])
@@ -13,22 +12,14 @@ def _to_out(row: dict) -> dict:
         "notebook_id": str(row["id"]),
         "owner_user_id": str(row["owner_user_id"]),
         "title": row["title"],
+        "synced": row["synced"],
         "created_at": row["created_at"],
     }
 
 
 @router.post("", response_model=NotebookOut, status_code=201)
 async def create_notebook(req: CreateNotebookRequest):
-    nb = await notebooks_store.create_notebook(owner_user_id=req.user_id, title=req.title)
-    nb_id = str(nb["id"])
-
-    await write_memory(
-        content=f"Notebook created: {req.title}",
-        container_tags=[f"user:{req.user_id}", f"notebook:{nb_id}"],
-        metadata={"type": "notebook_profile", "title": req.title, "owner_user_id": req.user_id},
-    )
-    await graph_store.create_notebook_node(notebook_id=nb_id, title=req.title, owner_user_id=req.user_id)
-
+    nb = await service.create_notebook(owner_user_id=req.user_id, title=req.title)
     return _to_out(nb)
 
 
@@ -40,7 +31,10 @@ async def list_notebooks(user_id: str):
 
 @router.get("/{notebook_id}", response_model=NotebookOut)
 async def get_notebook(notebook_id: str):
-    nb = await notebooks_store.get_notebook(notebook_id)
+    try:
+        nb = await service.get_notebook(notebook_id)
+    except service.NotebookSyncError:
+        raise HTTPException(503, "server error, please try again later")
     if not nb:
         raise HTTPException(404, "notebook not found")
     return _to_out(nb)

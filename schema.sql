@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS notebooks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_user_id UUID NOT NULL REFERENCES users(id),
     title TEXT NOT NULL,
+    synced BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

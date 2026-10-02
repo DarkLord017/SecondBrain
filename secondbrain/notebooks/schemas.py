@@ -12,4 +12,5 @@ class NotebookOut(BaseModel):
     notebook_id: str
     owner_user_id: str
     title: str
+    synced: bool
     created_at: datetime

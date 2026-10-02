@@ -10,7 +10,7 @@ async def create_notebook(owner_user_id: str, title: str) -> dict:
                 """
                 INSERT INTO notebooks (owner_user_id, title)
                 VALUES (%s, %s)
-                RETURNING id, owner_user_id, title, created_at
+                RETURNING id, owner_user_id, title, synced, created_at
                 """,
                 (owner_user_id, title),
             )
@@ -22,7 +22,7 @@ async def list_notebooks(owner_user_id: str) -> list[dict]:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
                 """
-                SELECT id, owner_user_id, title, created_at
+                SELECT id, owner_user_id, title, synced, created_at
                 FROM notebooks WHERE owner_user_id = %s
                 ORDER BY created_at DESC
                 """,
@@ -35,7 +35,12 @@ async def get_notebook(notebook_id: str) -> dict | None:
     async with get_pool().connection() as conn:
         async with conn.cursor(row_factory=dict_row) as cur:
             await cur.execute(
-                "SELECT id, owner_user_id, title, created_at FROM notebooks WHERE id = %s",
+                "SELECT id, owner_user_id, title, synced, created_at FROM notebooks WHERE id = %s",
                 (notebook_id,),
             )
             return await cur.fetchone()
+
+
+async def set_synced(notebook_id: str, value: bool) -> None:
+    async with get_pool().connection() as conn:
+        await conn.execute("UPDATE notebooks SET synced = %s WHERE id = %s", (value, notebook_id))

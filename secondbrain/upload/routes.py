@@ -12,7 +12,6 @@ from secondbrain.upload.schemas import DocumentStatusOut, UploadResponse
 
 router = APIRouter(prefix="/notebooks", tags=["upload"])
 
-
 @router.post("/{notebook_id}/upload", response_model=UploadResponse, status_code=202)
 async def upload(
     notebook_id: str,
@@ -20,6 +19,7 @@ async def upload(
     background_tasks: BackgroundTasks,
     user_id: str = Form(...),
     file: UploadFile = File(...),
+    is_handwritten: bool = Form(False),
 ):
     redis = request.app.state.redis
     raw = await file.read()
@@ -30,7 +30,9 @@ async def upload(
         raise HTTPException(429, str(e))
 
     try:
-        validated = sniff_and_validate(raw, filename=file.filename or "upload")
+        validated = sniff_and_validate(
+            raw, filename=file.filename or "upload", is_handwritten_hint=is_handwritten
+        )
     except GuardrailError as e:
         raise HTTPException(400, str(e))
 
