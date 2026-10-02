@@ -1,0 +1,65 @@
+from secondbrain.chat.events import publish_event
+from secondbrain.config import settings
+from secondbrain.gateway.cache import set_cached
+from secondbrain.gateway.spend_cap import settle
+from secondbrain.orchestrator.graph import build_graph
+from secondbrain.storage import ledger as ledger_store
+from secondbrain.storage import runs as runs_store
+from secondbrain.storage.redis_client import get_redis
+
+
+async def run_orchestrator_background(
+    run_id: str,
+    notebook_id: str,
+    user_id: str,
+    question: str,
+    reservation_key: str,
+) -> None:
+    await runs_store.update_run_status(run_id, "running")
+    redis = get_redis()
+
+    graph = build_graph()
+    initial_state = {
+        "user_id": user_id,
+        "notebook_id": notebook_id,
+        "session_id": run_id,
+        "question": question,
+        "tool_results": {},
+        "citations": [],
+        "retries": 0,
+        "current_wave": 0,
+    }
+    config = {"configurable": {"thread_id": run_id}}
+
+    final_text_parts: list[str] = []
+    final_citations: list[dict] = []
+
+    try:
+        async for event in graph.astream_events(initial_state, config, version="v2"):
+            if (
+                event["event"] == "on_chat_model_stream"
+                and event.get("metadata", {}).get("langgraph_node") == "writer"
+            ):
+                token = event["data"]["chunk"].content
+                if token:
+                    final_text_parts.append(token)
+                    await publish_event(run_id, {"type": "token", "data": token})
+            if event["event"] == "on_chain_end" and event["name"] == "writer":
+                final_citations = (event["data"]["output"] or {}).get("citations", [])
+
+        final_answer = "".join(final_text_parts)
+        await runs_store.update_run_status(run_id, "done", final_answer=final_answer)
+
+        await settle(redis, reservation_key, settings.fake_cost_per_call_cents, settings.fake_cost_per_call_cents)
+        await ledger_store.record(
+            run_id=run_id, notebook_id=notebook_id, user_id=user_id, cost_cents=settings.fake_cost_per_call_cents
+        )
+        await set_cached(
+            redis, notebook_id, question, final_answer, final_citations, run_id, settings.cache_ttl_seconds
+        )
+
+        await publish_event(run_id, {"type": "final", "data": {"answer": final_answer, "citations": final_citations}})
+    except Exception as e:  # noqa: BLE001 - must always resolve the run, never hang a WS client
+        await runs_store.update_run_status(run_id, "error", error=str(e))
+        await settle(redis, reservation_key, settings.fake_cost_per_call_cents, 0)
+        await publish_event(run_id, {"type": "error", "data": str(e)})
