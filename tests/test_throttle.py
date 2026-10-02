@@ -1,7 +1,12 @@
 import fakeredis.aioredis
 import pytest
 
-from secondbrain.gateway.throttle import ThrottleExceeded, check_rate_limit, enter_stream_slot
+from secondbrain.gateway.throttle import (
+    ThrottleExceeded,
+    check_rate_limit,
+    enter_stream_slot,
+    exit_stream_slot,
+)
 
 
 @pytest.fixture
@@ -33,6 +38,20 @@ async def test_scoped_per_user_and_notebook(redis):
 
 @pytest.mark.asyncio
 async def test_concurrent_stream_cap(redis):
-    await enter_stream_slot(redis, max_concurrent=1)
+    await enter_stream_slot(redis, "u1", max_concurrent=1)
     with pytest.raises(ThrottleExceeded):
-        await enter_stream_slot(redis, max_concurrent=1)
+        await enter_stream_slot(redis, "u1", max_concurrent=1)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_stream_cap_scoped_per_user(redis):
+    await enter_stream_slot(redis, "u1", max_concurrent=1)
+    # a different user should have their own independent slot budget
+    await enter_stream_slot(redis, "u2", max_concurrent=1)
+
+
+@pytest.mark.asyncio
+async def test_exit_stream_slot_frees_capacity(redis):
+    await enter_stream_slot(redis, "u1", max_concurrent=1)
+    await exit_stream_slot(redis, "u1")
+    await enter_stream_slot(redis, "u1", max_concurrent=1)

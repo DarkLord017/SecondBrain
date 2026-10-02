@@ -1,6 +1,8 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from secondbrain.chat.events import CHANNEL, get_log
+from secondbrain.config import settings
+from secondbrain.gateway.throttle import ThrottleExceeded, enter_stream_slot, exit_stream_slot
 from secondbrain.storage import runs as runs_store
 from secondbrain.storage.redis_client import get_redis
 
@@ -33,6 +35,14 @@ async def ws_run(ws: WebSocket, run_id: str):
         return
 
     redis = get_redis()
+    user_id = str(run["user_id"])
+    try:
+        await enter_stream_slot(redis, user_id, settings.max_concurrent_streams)
+    except ThrottleExceeded:
+        await ws.send_json({"type": "error", "data": "too many concurrent streams for this user"})
+        await ws.close()
+        return
+
     pubsub = redis.pubsub()
     channel = CHANNEL.format(run_id=run_id)
     await pubsub.subscribe(channel)
@@ -47,6 +57,7 @@ async def ws_run(ws: WebSocket, run_id: str):
         pass
     finally:
         await pubsub.unsubscribe(channel)
+        await exit_stream_slot(redis, user_id)
         try:
             await ws.close()
         except RuntimeError:

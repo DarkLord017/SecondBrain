@@ -15,13 +15,13 @@ async def check_rate_limit(r: redis.Redis, user_id: str, notebook_id: str, limit
     if count > limit_per_min:
         raise ThrottleExceeded("rate limit exceeded")
 
-
-async def enter_stream_slot(r: redis.Redis, max_concurrent: int) -> None:
-    n = await r.incr("streams:concurrent")
+async def enter_stream_slot(r: redis.Redis, user_id: str, max_concurrent: int) -> None:
+    key = f"streams:concurrent:{user_id}"
+    n = await r.incr(key)
     if n > max_concurrent:
-        await r.decr("streams:concurrent")
+        await r.decr(key)
         raise ThrottleExceeded("too many concurrent streams")
 
 
-async def exit_stream_slot(r: redis.Redis) -> None:
-    await r.decr("streams:concurrent")
+async def exit_stream_slot(r: redis.Redis, user_id: str) -> None:
+    await r.decr(f"streams:concurrent:{user_id}")

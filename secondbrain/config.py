@@ -20,10 +20,13 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "changeme123"
 
-    spend_cap_usd: float = 3.0
+    spend_cap_usd: float = 5.0
     throttle_per_min: int = 30
-    max_concurrent_streams: int = 20
-    fake_cost_per_call_cents: int = 50
+    max_concurrent_streams: int = 5
+
+    price_per_1k_input_tokens: float = 0.003
+    price_per_1k_output_tokens: float = 0.015
+    max_response_tokens_estimate: int = 1000
 
     cache_similarity_threshold: float = 0.92
     cache_ttl_seconds: int = 3600
