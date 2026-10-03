@@ -5,8 +5,6 @@ import pytest
 
 from secondbrain.upload.guardrails import GuardrailError, sniff_and_validate
 
-# Real, minimal-but-valid file bytes so python-magic sniffs the type we expect
-# (a bare magic-number prefix isn't enough — libmagic falls back to text/plain).
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
 )

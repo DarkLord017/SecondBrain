@@ -1,8 +1,10 @@
 import json
 
+from secondbrain.config import settings
+from secondbrain.integrations import supermemory_client
 from secondbrain.integrations.llm import get_chat_model
 from secondbrain.orchestrator.registry import TOOL_REGISTRY
-from secondbrain.orchestrator.state import GraphState, PlanStep
+from secondbrain.orchestrator.state import GraphState, PlanStep, ToolResult
 from secondbrain.storage import notebooks as notebook_store
 
 MAX_PLAN_STEPS = 5
@@ -15,12 +17,27 @@ async def hydrate(state: GraphState) -> dict:
 
 
 async def warm_up(state: GraphState) -> dict:
-    # No-op placeholder: once a Recall tool-agent exists, do a cheap
-    # Supermemory profile lookup here for an instant high-confidence answer.
-    # Kept as a real graph node now so the control-flow shape (hydrate ->
-    # warm_up -> planner, and the router's loop-back) doesn't need
-    # restructuring when that's added.
-    return {"warmup_answer": None}
+    """Cheap Recall lookup for an instant answer, skipping the planner
+    entirely when there's already a high-confidence fact about the user
+    matching the question. On a hit, seeds tool_results with the same shape
+    a fan-out tool node would produce, so writer() can build a cited answer
+    from it without any special-casing.
+    """
+    try:
+        results = await supermemory_client.search(
+            query=state["question"], container_tags=[f"user:{state['user_id']}"], limit=1
+        )
+    except Exception:  # noqa: BLE001 - warm-up is a shortcut, never a hard dependency
+        return {"warmup_answer": None}
+
+    if not results or results[0].get("similarity", 0) < settings.warmup_similarity_threshold:
+        return {"warmup_answer": None}
+
+    top = results[0]
+    return {
+        "warmup_answer": top.get("memory") or top.get("chunk") or top.get("content") or "",
+        "tool_results": {"recall": ToolResult(tool="recall", ok=True, chunks=[top])},
+    }
 
 
 def route_after_warmup(state: GraphState) -> str:
@@ -29,13 +46,17 @@ def route_after_warmup(state: GraphState) -> str:
 
 async def planner(state: GraphState) -> dict:
     model = get_chat_model()
-    available_tools = list(TOOL_REGISTRY.keys())
+    tool_descriptions = "\n".join(
+        f"- {name}: {agent.description}" for name, agent in TOOL_REGISTRY.items()
+    )
     prompt = (
-        "You are a planner for a notebook Q&A assistant. "
-        f"Available tools: {available_tools}. "
+        "You are a planner for a notebook Q&A assistant. Pick only the tools actually "
+        "needed to answer the question — do not call a tool 'just in case', and never call "
+        "the same tool twice with near-duplicate queries.\n\n"
+        f"Available tools:\n{tool_descriptions}\n\n"
         f"Question: {state['question']!r}. "
         f"Produce at most {MAX_PLAN_STEPS} steps as a JSON array ONLY, no prose: "
-        '[{"tool": "<one of available_tools>", "query": "<search text>", "wave": <int starting at 0>}]. '
+        '[{"tool": "<tool name from the list above>", "query": "<search text>", "wave": <int starting at 0>}]. '
         "Steps with the same wave number run in parallel."
     )
     resp = await model.ainvoke(prompt)
@@ -97,7 +118,10 @@ async def writer(state: GraphState) -> dict:
     )
     prompt = (
         "Answer the question using only the numbered sources below; cite sources inline as [n]. "
-        "If sources conflict, flag the conflict explicitly rather than silently picking one.\n\n"
+        "If sources conflict, flag the conflict explicitly rather than silently picking one. "
+        "Any source starting with 'CONTRADICTION:' is a confirmed conflict already detected in the "
+        "notebook's idea graph (not just something you noticed) — always surface it if it's relevant "
+        "to the question, rather than treating it as optional.\n\n"
         f"Question: {state['question']}\n\nSources:\n{context_text or '(none found)'}"
     )
     resp = await model.ainvoke(prompt)

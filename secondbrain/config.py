@@ -13,6 +13,9 @@ class Settings(BaseSettings):
 
     llamaparse_api_key: str = ""
 
+    tavily_api_key: str = ""
+    tavily_base_url: str = "https://api.tavily.com"
+
     database_url: str = "postgresql://secondbrain:secondbrain@localhost:5432/secondbrain"
     redis_url: str = "redis://localhost:6379/0"
 
@@ -30,6 +33,7 @@ class Settings(BaseSettings):
 
     cache_similarity_threshold: float = 0.92
     cache_ttl_seconds: int = 3600
+    warmup_similarity_threshold: float = 0.85
 
     upload_quota_bytes_per_day: int = 500 * 1024 * 1024
 

@@ -5,6 +5,7 @@ from secondbrain.orchestrator.state import GraphState, ToolResult
 
 class Finder:
     name = "finder"
+    description = "Searches the user's own uploaded notes/documents in this notebook (PDFs, transcripts, handwritten notes). Use for anything referencing 'my notes', 'the document', or notebook content."
 
     async def run(self, state: GraphState, query: str) -> ToolResult:
         try:

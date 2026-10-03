@@ -26,6 +26,7 @@ async def extract_and_store_ideas(
             # TODO: push to a retry queue instead of dropping once a worker exists.
             return
 
-    ideas = await extract_ideas(text)
+    existing_ideas = await graph_store.get_notebook_ideas(notebook_id)
+    ideas = await extract_ideas(text, existing_ideas=existing_ideas)
     if ideas:
         await graph_store.merge_ideas(notebook_id=notebook_id, ideas=ideas)

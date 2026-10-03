@@ -10,6 +10,7 @@ from secondbrain.orchestrator.state import ToolResult
 
 class FakeTool:
     name = "fake_tool"
+    description = "A fake tool used only in this test."
 
     def __init__(self):
         self.calls = 0
@@ -57,6 +58,11 @@ async def test_graph_retries_failing_tool_then_finishes(monkeypatch):
         return None
 
     monkeypatch.setattr(nodes.notebook_store, "get_notebook", fake_get_notebook)
+
+    async def fake_search(**kwargs):
+        return []  # no warm-up hit -> falls through to the planner
+
+    monkeypatch.setattr(nodes.supermemory_client, "search", fake_search)
 
     graph = build_graph()
     result = await graph.ainvoke(

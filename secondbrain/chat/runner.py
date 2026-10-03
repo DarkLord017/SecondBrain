@@ -4,6 +4,7 @@ from secondbrain.gateway.cache import set_cached
 from secondbrain.gateway.firewall import redact_pii
 from secondbrain.gateway.spend_cap import settle
 from secondbrain.gateway.tokens import count_tokens, estimate_cost_cents
+from secondbrain.orchestrator.checkpointer import get_checkpointer
 from secondbrain.orchestrator.graph import build_graph
 from secondbrain.storage import ledger as ledger_store
 from secondbrain.storage import runs as runs_store
@@ -21,7 +22,7 @@ async def run_orchestrator_background(
     await runs_store.update_run_status(run_id, "running")
     redis = get_redis()
 
-    graph = build_graph()
+    graph = build_graph(checkpointer=get_checkpointer())
     initial_state = {
         "user_id": user_id,
         "notebook_id": notebook_id,
