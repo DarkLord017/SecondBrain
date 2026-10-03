@@ -59,6 +59,7 @@ async def run_orchestrator_background(
                     await publish_event(run_id, {"type": "token", "data": token})
             if event["event"] == "on_chain_end" and event["name"] == "finalize":
                 final_citations = (event["data"]["output"] or {}).get("citations", [])
+                await publish_event(run_id, {"type": "status", "data": "verifying_citations"})
             if event["event"] == "on_chain_end" and event["name"] == "fact_check":
                 final_citation_flags = (event["data"]["output"] or {}).get("citation_flags", [])
 

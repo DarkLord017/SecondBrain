@@ -27,7 +27,7 @@ async def ws_run(ws: WebSocket, run_id: str):
     if already_final or run["status"] in ("done", "error"):
         if not already_final and run["status"] == "done":
             await ws.send_json(
-                {"type": "final", "data": {"answer": run["final_answer"], "citations": []}}
+                {"type": "final", "data": {"answer": run["final_answer"], "citations": [], "citation_flags": []}}
             )
         elif not already_final and run["status"] == "error":
             await ws.send_json({"type": "error", "data": run["error"]})
