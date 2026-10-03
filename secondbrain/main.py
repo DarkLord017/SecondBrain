@@ -10,6 +10,7 @@ from secondbrain.chat.ws_routes import router as ws_router
 from secondbrain.ingestion.retry_worker import run_retry_worker_forever
 from secondbrain.notebooks.routes import router as notebooks_router
 from secondbrain.orchestrator.checkpointer import close_checkpointer, init_checkpointer
+from secondbrain.orchestrator.telemetry import init_langfuse
 from secondbrain.storage.db import close_pool, init_pool
 from secondbrain.storage.neo4j_client import close_driver, init_driver
 from secondbrain.storage.redis_client import close_redis, init_redis
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
     app.state.redis = init_redis()
     app.state.neo4j = init_driver()
     app.state.checkpointer = await init_checkpointer()
+    init_langfuse()
     register_finder()
     register_scout()
     register_recall()

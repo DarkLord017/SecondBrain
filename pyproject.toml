@@ -23,6 +23,7 @@ dependencies = [
     "python-magic>=0.4.27",
     "neo4j>=5.24",
     "tenacity>=9.0",
+    "langfuse",
 ]
 
 [project.optional-dependencies]

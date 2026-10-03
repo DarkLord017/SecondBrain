@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     tavily_base_url: str = "https://api.tavily.com"
 
+    # Optional — observability only, chat works fine with these unset.
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+
     database_url: str = "postgresql://secondbrain:secondbrain@localhost:5432/secondbrain"
     redis_url: str = "redis://localhost:6379/0"
 

@@ -6,6 +6,7 @@ from secondbrain.gateway.spend_cap import settle
 from secondbrain.gateway.tokens import count_tokens, estimate_cost_cents
 from secondbrain.orchestrator.checkpointer import get_checkpointer
 from secondbrain.orchestrator.graph import build_graph
+from secondbrain.orchestrator.telemetry import get_langfuse_callbacks
 from secondbrain.storage import ledger as ledger_store
 from secondbrain.storage import runs as runs_store
 from secondbrain.storage.redis_client import get_redis
@@ -29,10 +30,18 @@ async def run_orchestrator_background(
         "question": question,
         "citations": [],
     }
-    # Stable per (notebook, user) thread, NOT per run_id — this is what gives
-    # the conversation cross-turn memory via the checkpointer. run_id stays
-    # separate, for ledger/status/WS-pubsub correlation of this one request.
-    config = {"configurable": {"thread_id": f"{notebook_id}:{user_id}"}}
+
+    thread_id = f"{notebook_id}:{user_id}"
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "callbacks": get_langfuse_callbacks(),
+        "metadata": {
+            "langfuse_session_id": thread_id,
+            "langfuse_user_id": user_id,
+            "run_id": run_id,
+            "notebook_id": notebook_id,
+        },
+    }
 
     final_text_parts: list[str] = []
     final_citations: list[dict] = []
