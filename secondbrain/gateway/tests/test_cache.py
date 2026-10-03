@@ -24,7 +24,7 @@ async def test_exact_hash_hit_skips_similarity_lookup(redis, monkeypatch):
     monkeypatch.setattr(cache.supermemory_client, "search_cache", fake_search_cache)
     monkeypatch.setattr(cache.supermemory_client, "write_cache_entry", fake_write_cache_entry)
 
-    await cache.set_cached(redis, "nb1", "what is the deadline?", "March 1st", [], "run1", ttl=60)
+    await cache.set_cached(redis, "nb1", "what is the deadline?", "March 1st", [], [], "run1", ttl=60)
     result = await cache.get_cached(redis, "nb1", "what is the deadline?", similarity_threshold=0.92)
 
     assert result["answer"] == "March 1st"

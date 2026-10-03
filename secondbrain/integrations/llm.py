@@ -25,6 +25,11 @@ class IdeaExtraction(BaseModel):
     ideas: list[Idea] = Field(default_factory=list, max_length=8)
 
 
+class CitationVerdict(BaseModel):
+    supported: bool = Field(description="true only if the web evidence clearly corroborates the claim")
+    reason: str = Field(description="one sentence explaining the verdict")
+
+
 def get_chat_model() -> ChatOpenAI:
     global _model
     if _model is None:
@@ -67,3 +72,23 @@ async def extract_ideas(text: str, existing_ideas: list[dict] | None = None) -> 
     )
     result: IdeaExtraction = await model.ainvoke(prompt)
     return [idea.model_dump() for idea in result.ideas]
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.5, min=0.5, max=4), reraise=True)
+async def verify_claim(claim: str, evidence: list[dict]) -> dict:
+    """Judges a cited claim from the final answer against real web search
+    results (not the original notebook source — the point is independent
+    corroboration, so a hallucinated or misattributed citation gets caught).
+    """
+    model = get_chat_model().with_structured_output(CitationVerdict)
+    evidence_block = "\n".join(
+        f"- {e.get('title', '')}: {(e.get('content') or '')[:500]}" for e in evidence
+    ) or "(no web results found)"
+    prompt = (
+        "A notebook assistant made the following claim and cited a source for it. Using ONLY "
+        "the web evidence below, judge whether the evidence corroborates the claim. If the "
+        "evidence is irrelevant, missing, or contradicts the claim, mark it unsupported.\n\n"
+        f"Claim: {claim}\n\nWeb evidence:\n{evidence_block}"
+    )
+    result: CitationVerdict = await model.ainvoke(prompt)
+    return result.model_dump()

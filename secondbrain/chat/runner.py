@@ -45,6 +45,7 @@ async def run_orchestrator_background(
 
     final_text_parts: list[str] = []
     final_citations: list[dict] = []
+    final_citation_flags: list[dict] = []
 
     try:
         async for event in graph.astream_events(initial_state, config, version="v2"):
@@ -58,6 +59,8 @@ async def run_orchestrator_background(
                     await publish_event(run_id, {"type": "token", "data": token})
             if event["event"] == "on_chain_end" and event["name"] == "finalize":
                 final_citations = (event["data"]["output"] or {}).get("citations", [])
+            if event["event"] == "on_chain_end" and event["name"] == "fact_check":
+                final_citation_flags = (event["data"]["output"] or {}).get("citation_flags", [])
 
         final_answer = redact_pii("".join(final_text_parts))
         await runs_store.update_run_status(run_id, "done", final_answer=final_answer)
@@ -77,10 +80,16 @@ async def run_orchestrator_background(
             tokens_out=output_tokens,
         )
         await set_cached(
-            redis, notebook_id, question, final_answer, final_citations, run_id, settings.cache_ttl_seconds
+            redis, notebook_id, question, final_answer, final_citations, final_citation_flags, run_id, settings.cache_ttl_seconds
         )
 
-        await publish_event(run_id, {"type": "final", "data": {"answer": final_answer, "citations": final_citations}})
+        await publish_event(
+            run_id,
+            {
+                "type": "final",
+                "data": {"answer": final_answer, "citations": final_citations, "citation_flags": final_citation_flags},
+            },
+        )
     except Exception as e:  # noqa: BLE001 - must always resolve the run, never hang a WS client
         await runs_store.update_run_status(run_id, "error", error=str(e))
         await settle(redis, reservation_key, reserved_cents, 0)

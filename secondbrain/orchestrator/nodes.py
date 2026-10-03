@@ -6,6 +6,7 @@ from langchain_core.tools import StructuredTool
 from secondbrain.config import settings
 from secondbrain.integrations import supermemory_client
 from secondbrain.integrations.llm import get_chat_model
+from secondbrain.orchestrator.fact_check import check_citations
 from secondbrain.orchestrator.registry import TOOL_REGISTRY
 from secondbrain.orchestrator.state import GraphState, ToolResult
 from secondbrain.storage import notebooks as notebook_store
@@ -38,6 +39,7 @@ async def hydrate(state: GraphState) -> dict:
         "notebook_context": dict(nb) if nb else {},
         "tool_results": {},
         "agent_steps": 0,
+        "citation_flags": [],
         "messages": [HumanMessage(content=state["question"])],
     }
 
@@ -144,7 +146,13 @@ async def tools(state: GraphState) -> dict:
         agent_obj = TOOL_REGISTRY.get(call["name"])
         if agent_obj is None:
             return call, ToolResult(tool=call["name"], ok=False, error=f"unknown tool: {call['name']}")
-        return call, await agent_obj.run(state, call["args"].get("query", ""))
+
+        async def _coro(query: str) -> ToolResult:
+            return await agent_obj.run(state, query)
+
+        wrapped = StructuredTool.from_function(coroutine=_coro, name=call["name"], description=agent_obj.description)
+        result: ToolResult = await wrapped.ainvoke({"query": call["args"].get("query", "")})
+        return call, result
 
     ran = await asyncio.gather(*(_run_one(c) for c in last.tool_calls))
 
@@ -169,3 +177,8 @@ async def finalize(state: GraphState) -> dict:
     if not final_answer and state["agent_steps"] >= MAX_AGENT_STEPS:
         final_answer = "I wasn't able to finish gathering information in time — please try rephrasing your question."
     return {"final_answer": final_answer, "citations": chunks}
+
+
+async def fact_check(state: GraphState) -> dict:
+    flags = await check_citations(state.get("final_answer") or "", state.get("citations") or [])
+    return {"citation_flags": flags}

@@ -27,4 +27,5 @@ class GraphState(TypedDict):
 
     final_answer: str | None
     citations: list[dict[str, Any]]
+    citation_flags: list[dict[str, Any]]
     error: str | None

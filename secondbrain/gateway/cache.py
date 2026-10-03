@@ -20,13 +20,20 @@ async def get_cached(r: redis.Redis, notebook_id: str, prompt: str, similarity_t
 
     similar_answer = await supermemory_client.search_cache(notebook_id, prompt, similarity_threshold)
     if similar_answer:
-        return {"answer": similar_answer, "citations": []}
+        return {"answer": similar_answer, "citations": [], "citation_flags": []}
     return None
 
 
 async def set_cached(
-    r: redis.Redis, notebook_id: str, prompt: str, answer: str, citations: list, run_id: str, ttl: int
+    r: redis.Redis,
+    notebook_id: str,
+    prompt: str,
+    answer: str,
+    citations: list,
+    citation_flags: list,
+    run_id: str,
+    ttl: int,
 ) -> None:
     key = cache_key(notebook_id, prompt)
-    await r.set(key, json.dumps({"answer": answer, "citations": citations}), ex=ttl)
+    await r.set(key, json.dumps({"answer": answer, "citations": citations, "citation_flags": citation_flags}), ex=ttl)
     await supermemory_client.write_cache_entry(notebook_id, prompt, answer, run_id)
