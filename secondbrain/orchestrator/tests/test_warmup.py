@@ -83,3 +83,13 @@ def test_primed_context_block_includes_recall_and_finder_only():
 def test_primed_context_block_skips_failed_results():
     state = {"tool_results": {"recall": ToolResult(tool="recall", ok=False, error="down")}}
     assert nodes._primed_context_block(state) == ""
+
+
+def test_notebook_context_line_empty_when_no_notebook():
+    assert nodes._notebook_context_line({"notebook_context": {}}) == ""
+    assert nodes._notebook_context_line({}) == ""
+
+
+def test_notebook_context_line_includes_title():
+    line = nodes._notebook_context_line({"notebook_context": {"title": "Thermodynamics 101"}})
+    assert "Thermodynamics 101" in line

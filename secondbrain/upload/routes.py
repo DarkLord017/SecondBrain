@@ -62,6 +62,7 @@ async def upload(
 
     background_tasks.add_task(
         extract_and_store_ideas,
+        document_id=str(doc["id"]),
         notebook_id=notebook_id,
         supermemory_document_id=result["supermemory_document_id"],
         parsed_text=result["parsed_text"],

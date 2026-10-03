@@ -106,6 +106,11 @@ def _primed_context_block(state: GraphState) -> str:
     )
 
 
+def _notebook_context_line(state: GraphState) -> str:
+    title = state.get("notebook_context", {}).get("title")
+    return f"\n\nYou are answering questions about the notebook titled {title!r}." if title else ""
+
+
 def _tool_specs() -> list[StructuredTool]:
     async def _stub(query: str) -> str:
         raise NotImplementedError("tool execution happens in the tools node, not via this stub")
@@ -118,7 +123,9 @@ def _tool_specs() -> list[StructuredTool]:
 
 async def agent(state: GraphState) -> dict:
     model = get_chat_model().bind_tools(_tool_specs())
-    system = SystemMessage(content=SYSTEM_PROMPT + _primed_context_block(state))
+    system = SystemMessage(
+        content=SYSTEM_PROMPT + _notebook_context_line(state) + _primed_context_block(state)
+    )
     resp = await model.ainvoke([system, *state["messages"]])
     return {"messages": [resp], "agent_steps": state["agent_steps"] + 1}
 

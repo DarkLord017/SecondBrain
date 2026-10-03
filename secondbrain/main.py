@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,6 +7,7 @@ from secondbrain.auth.routes import router as auth_router
 from secondbrain.chat.routes import router as chat_router
 from secondbrain.chat.routes import runs_router
 from secondbrain.chat.ws_routes import router as ws_router
+from secondbrain.ingestion.retry_worker import run_retry_worker_forever
 from secondbrain.notebooks.routes import router as notebooks_router
 from secondbrain.orchestrator.checkpointer import close_checkpointer, init_checkpointer
 from secondbrain.storage.db import close_pool, init_pool
@@ -30,7 +32,9 @@ async def lifespan(app: FastAPI):
     register_recall()
     register_linker()
     register_skeptic()
+    retry_worker_task = asyncio.create_task(run_retry_worker_forever())
     yield
+    retry_worker_task.cancel()
     await close_checkpointer()
     await close_pool()
     await close_redis()
