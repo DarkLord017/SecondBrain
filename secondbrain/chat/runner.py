@@ -26,14 +26,13 @@ async def run_orchestrator_background(
     initial_state = {
         "user_id": user_id,
         "notebook_id": notebook_id,
-        "session_id": run_id,
         "question": question,
-        "tool_results": {},
         "citations": [],
-        "retries": 0,
-        "current_wave": 0,
     }
-    config = {"configurable": {"thread_id": run_id}}
+    # Stable per (notebook, user) thread, NOT per run_id — this is what gives
+    # the conversation cross-turn memory via the checkpointer. run_id stays
+    # separate, for ledger/status/WS-pubsub correlation of this one request.
+    config = {"configurable": {"thread_id": f"{notebook_id}:{user_id}"}}
 
     final_text_parts: list[str] = []
     final_citations: list[dict] = []
@@ -42,13 +41,13 @@ async def run_orchestrator_background(
         async for event in graph.astream_events(initial_state, config, version="v2"):
             if (
                 event["event"] == "on_chat_model_stream"
-                and event.get("metadata", {}).get("langgraph_node") == "writer"
+                and event.get("metadata", {}).get("langgraph_node") == "agent"
             ):
                 token = event["data"]["chunk"].content
                 if token:
                     final_text_parts.append(token)
                     await publish_event(run_id, {"type": "token", "data": token})
-            if event["event"] == "on_chain_end" and event["name"] == "writer":
+            if event["event"] == "on_chain_end" and event["name"] == "finalize":
                 final_citations = (event["data"]["output"] or {}).get("citations", [])
 
         final_answer = redact_pii("".join(final_text_parts))

@@ -1,128 +1,164 @@
-import json
+import asyncio
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 
 from secondbrain.config import settings
 from secondbrain.integrations import supermemory_client
 from secondbrain.integrations.llm import get_chat_model
 from secondbrain.orchestrator.registry import TOOL_REGISTRY
-from secondbrain.orchestrator.state import GraphState, PlanStep, ToolResult
+from secondbrain.orchestrator.state import GraphState, ToolResult
 from secondbrain.storage import notebooks as notebook_store
 
-MAX_PLAN_STEPS = 5
-MAX_RETRIES = 2
+MAX_AGENT_STEPS = 4
+
+SYSTEM_PROMPT = (
+    "You are a notebook Q&A assistant. Use the available tools to gather information, "
+    "then answer the user's question. Cite sources inline as [n] referencing the order "
+    "tool results appeared. If sources conflict, flag the conflict explicitly rather than "
+    "silently picking one. Any tool result starting with 'CONTRADICTION:' is a confirmed "
+    "conflict already detected in the notebook's idea graph (not just something you "
+    "noticed) — always surface it if relevant. Only call tools you actually need; never "
+    "call the same tool twice with near-duplicate queries."
+)
+
+# Which tool_results entries, if already populated by warm_up/prime_context
+# before the agent's first turn, get folded into the system prompt as
+# background context instead of the agent having to call them itself.
+PRIMED_TOOLS = ("recall", "finder")
+
+
+def _chunks_to_text(chunks: list[dict]) -> str:
+    return "\n\n".join(c.get("content") or c.get("memory") or c.get("chunk") or "" for c in chunks)
 
 
 async def hydrate(state: GraphState) -> dict:
     nb = await notebook_store.get_notebook(state["notebook_id"])
-    return {"notebook_context": dict(nb) if nb else {}}
+    return {
+        "notebook_context": dict(nb) if nb else {},
+        "tool_results": {},
+        "agent_steps": 0,
+        "messages": [HumanMessage(content=state["question"])],
+    }
 
 
 async def warm_up(state: GraphState) -> dict:
-    """Cheap Recall lookup for an instant answer, skipping the planner
-    entirely when there's already a high-confidence fact about the user
-    matching the question. On a hit, seeds tool_results with the same shape
-    a fan-out tool node would produce, so writer() can build a cited answer
-    from it without any special-casing.
+    """Proactively checks Recall for a high-confidence fact about the user
+    before the agent's first turn. Just populates tool_results — the agent
+    node folds this into its system prompt as background context (see
+    _primed_context_block), it does NOT fabricate a fake tool-call message.
     """
     try:
         results = await supermemory_client.search(
             query=state["question"], container_tags=[f"user:{state['user_id']}"], limit=1
         )
     except Exception:  # noqa: BLE001 - warm-up is a shortcut, never a hard dependency
-        return {"warmup_answer": None}
+        return {}
 
     if not results or results[0].get("similarity", 0) < settings.warmup_similarity_threshold:
-        return {"warmup_answer": None}
+        return {}
 
-    top = results[0]
     return {
-        "warmup_answer": top.get("memory") or top.get("chunk") or top.get("content") or "",
-        "tool_results": {"recall": ToolResult(tool="recall", ok=True, chunks=[top])},
+        "tool_results": {
+            **state["tool_results"],
+            "recall": ToolResult(tool="recall", ok=True, chunks=[results[0]]),
+        }
     }
 
 
-def route_after_warmup(state: GraphState) -> str:
-    return "writer" if state["warmup_answer"] else "planner"
-
-
-async def planner(state: GraphState) -> dict:
-    model = get_chat_model()
-    tool_descriptions = "\n".join(
-        f"- {name}: {agent.description}" for name, agent in TOOL_REGISTRY.items()
-    )
-    prompt = (
-        "You are a planner for a notebook Q&A assistant. Pick only the tools actually "
-        "needed to answer the question — do not call a tool 'just in case', and never call "
-        "the same tool twice with near-duplicate queries.\n\n"
-        f"Available tools:\n{tool_descriptions}\n\n"
-        f"Question: {state['question']!r}. "
-        f"Produce at most {MAX_PLAN_STEPS} steps as a JSON array ONLY, no prose: "
-        '[{"tool": "<tool name from the list above>", "query": "<search text>", "wave": <int starting at 0>}]. '
-        "Steps with the same wave number run in parallel."
-    )
-    resp = await model.ainvoke(prompt)
+async def prime_context(state: GraphState) -> dict:
+    """Same idea as warm_up, but a quick Finder search over notebook
+    content, so the agent's first turn isn't deciding what to call while
+    blind to what's actually in the notebook. The agent can still call
+    Finder itself for more/different results — the system prompt tells it
+    this is a starting point, not the full answer.
+    """
     try:
-        raw_steps = json.loads(resp.content)
-    except (json.JSONDecodeError, TypeError):
-        raw_steps = []
+        results = await supermemory_client.search(
+            query=state["question"], container_tags=[f"notebook:{state['notebook_id']}"], limit=3
+        )
+    except Exception:  # noqa: BLE001 - priming is a shortcut, never a hard dependency
+        return {}
 
-    steps: list[PlanStep] = [s for s in raw_steps[:MAX_PLAN_STEPS] if s.get("tool") in TOOL_REGISTRY]
-    if not steps and TOOL_REGISTRY:
-        default_tool = "finder" if "finder" in TOOL_REGISTRY else next(iter(TOOL_REGISTRY))
-        steps = [{"tool": default_tool, "query": state["question"], "wave": 0}]
+    if not results:
+        return {}
 
-    return {"plan": steps, "current_wave": 0, "tool_results": {}, "retries": 0}
-
-
-def _wave_node_names(state: GraphState, wave: int) -> list[str]:
-    names = [f"tool_{s['tool']}" for s in state["plan"] if s["wave"] == wave]
-    return names or ["router"]
-
-
-def route_after_planner(state: GraphState) -> list[str]:
-    return _wave_node_names(state, state["current_wave"])
+    return {
+        "tool_results": {
+            **state["tool_results"],
+            "finder": ToolResult(tool="finder", ok=True, chunks=results),
+        }
+    }
 
 
-async def router(state: GraphState) -> dict:
-    wave_steps = [s for s in state["plan"] if s["wave"] == state["current_wave"]]
-    wave_results = [state["tool_results"].get(s["tool"]) for s in wave_steps]
-    any_failed = any(r is None or not r.ok for r in wave_results)
-
-    if any_failed and state["retries"] < MAX_RETRIES:
-        return {"retries": state["retries"] + 1, "route_decision": "retry"}
-
-    next_wave = state["current_wave"] + 1
-    has_more_waves = any(s["wave"] == next_wave for s in state["plan"])
-    if has_more_waves:
-        return {"current_wave": next_wave, "route_decision": "next_wave"}
-
-    return {"route_decision": "finish"}
-
-
-def route_after_router(state: GraphState):
-    decision = state["route_decision"]
-    if decision in ("retry", "next_wave"):
-        return _wave_node_names(state, state["current_wave"])
-    return "writer"
+def _primed_context_block(state: GraphState) -> str:
+    results = state.get("tool_results", {})
+    sections = [
+        f"Already retrieved from {name}:\n{_chunks_to_text(result.chunks)}"
+        for name in PRIMED_TOOLS
+        if (result := results.get(name)) and result.ok and result.chunks
+    ]
+    if not sections:
+        return ""
+    return (
+        "\n\nBackground context retrieved before you started (you don't need to call these "
+        "tools again unless you need more or different information):\n\n" + "\n\n".join(sections)
+    )
 
 
-async def writer(state: GraphState) -> dict:
-    model = get_chat_model()
+def _tool_specs() -> list[StructuredTool]:
+    async def _stub(query: str) -> str:
+        raise NotImplementedError("tool execution happens in the tools node, not via this stub")
+
+    return [
+        StructuredTool.from_function(coroutine=_stub, name=name, description=agent_obj.description)
+        for name, agent_obj in TOOL_REGISTRY.items()
+    ]
+
+
+async def agent(state: GraphState) -> dict:
+    model = get_chat_model().bind_tools(_tool_specs())
+    system = SystemMessage(content=SYSTEM_PROMPT + _primed_context_block(state))
+    resp = await model.ainvoke([system, *state["messages"]])
+    return {"messages": [resp], "agent_steps": state["agent_steps"] + 1}
+
+
+def route_after_agent(state: GraphState) -> str:
+    last = state["messages"][-1]
+    if getattr(last, "tool_calls", None) and state["agent_steps"] < MAX_AGENT_STEPS:
+        return "tools"
+    return "finalize"
+
+
+async def tools(state: GraphState) -> dict:
+    last = state["messages"][-1]
+
+    async def _run_one(call: dict):
+        agent_obj = TOOL_REGISTRY.get(call["name"])
+        if agent_obj is None:
+            return call, ToolResult(tool=call["name"], ok=False, error=f"unknown tool: {call['name']}")
+        return call, await agent_obj.run(state, call["args"].get("query", ""))
+
+    ran = await asyncio.gather(*(_run_one(c) for c in last.tool_calls))
+
+    tool_messages = []
+    updated_results = dict(state["tool_results"])
+    for call, result in ran:
+        updated_results[call["name"]] = result
+        content = _chunks_to_text(result.chunks) if result.ok else f"error: {result.error}"
+        tool_messages.append(ToolMessage(content=content or "(no results)", tool_call_id=call["id"], name=call["name"]))
+
+    return {"messages": tool_messages, "tool_results": updated_results}
+
+
+async def finalize(state: GraphState) -> dict:
     chunks = [
         {"tool": tool, **c}
         for tool, result in state["tool_results"].items()
         for c in (result.chunks if result.ok else [])
     ]
-    context_text = "\n\n".join(
-        f"[{i}] (source={c['tool']}) {c.get('content') or c.get('memory') or c.get('chunk')}"
-        for i, c in enumerate(chunks)
-    )
-    prompt = (
-        "Answer the question using only the numbered sources below; cite sources inline as [n]. "
-        "If sources conflict, flag the conflict explicitly rather than silently picking one. "
-        "Any source starting with 'CONTRADICTION:' is a confirmed conflict already detected in the "
-        "notebook's idea graph (not just something you noticed) — always surface it if it's relevant "
-        "to the question, rather than treating it as optional.\n\n"
-        f"Question: {state['question']}\n\nSources:\n{context_text or '(none found)'}"
-    )
-    resp = await model.ainvoke(prompt)
-    return {"final_answer": resp.content, "citations": chunks}
+    last = state["messages"][-1]
+    final_answer = last.content if isinstance(last, AIMessage) else ""
+    if not final_answer and state["agent_steps"] >= MAX_AGENT_STEPS:
+        final_answer = "I wasn't able to finish gathering information in time — please try rephrasing your question."
+    return {"final_answer": final_answer, "citations": chunks}
