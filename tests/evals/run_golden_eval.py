@@ -112,7 +112,16 @@ async def _run(fixtures: dict, items: list[dict]) -> None:
         await _upload_and_wait(client, helios_notebook_id, user_id, "helios_memo_b.txt", fixtures["helios_doc_b"])
         await _wait_for_ideas(helios_notebook_id, min_count=2)
 
-        notebook_ids = {"lumen": lumen_notebook_id, "helios": helios_notebook_id}
+        resp = await client.post("/notebooks", json={"user_id": user_id, "title": fixtures["capital_notebook_title"]})
+        resp.raise_for_status()
+        capital_notebook_id = resp.json()["notebook_id"]
+        print(f"seeding '{fixtures['capital_notebook_title']}' ({capital_notebook_id})...")
+        await _upload_and_wait(client, capital_notebook_id, user_id, "capital_correct.txt", fixtures["capital_doc_correct"])
+        await _wait_for_ideas(capital_notebook_id, min_count=1)
+        await _upload_and_wait(client, capital_notebook_id, user_id, "capital_wrong.txt", fixtures["capital_doc_wrong"])
+        await _wait_for_ideas(capital_notebook_id, min_count=2)
+
+        notebook_ids = {"lumen": lumen_notebook_id, "helios": helios_notebook_id, "capital": capital_notebook_id}
 
         print()
         print(f"running {len(items)} eval questions sequentially...")
