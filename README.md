@@ -1,8 +1,6 @@
 System Design
 
-<img width="3640" height="2420" alt="image" src="https://github.com/user-attachments/assets/2368a021-6673-4169-a298-6e0315c00593" />
-
-> The diagram above is the original design sketch (Gateway → LangGraph Hydrate → Planner → Fan-out → Router → Writer). The orchestrator's internals changed during implementation — see **Orchestrator** below for what actually runs now: a real agent↔tools loop with cross-turn memory, not a fixed plan-then-execute pipeline. Everything else (Gateway, dual-write ingestion, WS streaming) matches the original design.
+<img width="3514" height="2192" alt="image" src="https://github.com/user-attachments/assets/4c826d8a-8c0a-4358-bc46-e2f4baad754f" />
 
 ## Running locally
 
