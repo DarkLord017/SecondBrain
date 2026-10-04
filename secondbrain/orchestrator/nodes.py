@@ -15,12 +15,17 @@ MAX_AGENT_STEPS = 4
 
 SYSTEM_PROMPT = (
     "You are a notebook Q&A assistant. Use the available tools to gather information, "
-    "then answer the user's question. Cite sources inline as [n] referencing the order "
-    "tool results appeared. If sources conflict, flag the conflict explicitly rather than "
-    "silently picking one. Any tool result starting with 'CONTRADICTION:' is a confirmed "
-    "conflict already detected in the notebook's idea graph (not just something you "
-    "noticed) — always surface it if relevant. Only call tools you actually need; never "
-    "call the same tool twice with near-duplicate queries."
+    "then answer the user's question.\n\n"
+    "CITATION FORMAT (required): every factual claim drawn from a tool result must end "
+    "with a bracketed number matching the order that result appeared in, e.g.:\n"
+    '  "The budget is $62,841 [1]. The lead engineer is Priya Natarajan [2]."\n'
+    "Do not state a tool-sourced fact without a [n] immediately after it. If a sentence "
+    'combines facts from multiple sources, cite each: "...launching in Q3 [1][2]."\n\n'
+    "If sources conflict, flag the conflict explicitly rather than silently picking one. "
+    "Any tool result starting with 'CONTRADICTION:' is a confirmed conflict already "
+    "detected in the notebook's idea graph (not just something you noticed) — always "
+    "surface it if relevant. Only call tools you actually need; never call the same tool "
+    "twice with near-duplicate queries."
 )
 
 # Which tool_results entries, if already populated by warm_up/prime_context

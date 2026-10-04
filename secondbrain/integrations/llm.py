@@ -85,9 +85,41 @@ async def verify_claim(claim: str, evidence: list[dict]) -> dict:
         f"- {e.get('title', '')}: {(e.get('content') or '')[:500]}" for e in evidence
     ) or "(no web results found)"
     prompt = (
-        "A notebook assistant made the following claim and cited a source for it. Using ONLY "
-        "the web evidence below, judge whether the evidence corroborates the claim. If the "
-        "evidence is irrelevant, missing, or contradicts the claim, mark it unsupported.\n\n"
+        "A notebook assistant made the following claim and cited a source for it.\n\n"
+        "First decide what KIND of claim this is:\n"
+        "1. A publicly verifiable fact — scientific, historical, encyclopedic, or general "
+        "knowledge that a reasonable web search should be able to confirm (e.g. 'CVD uses "
+        "precursor gases', 'water boils at 100C'). Judge these normally against the evidence: "
+        "mark unsupported if the evidence contradicts the claim, or is absent for something "
+        "that should be well-documented publicly.\n"
+        "2. Private or source-specific information — something scoped to the user's own notes, "
+        "an organization, or a private document (e.g. an internal budget figure, a specific "
+        "person's role on a private project, a number from someone's personal records). The "
+        "public web has no way to confirm or deny these and never will — do NOT mark these "
+        "unsupported just because the search came back empty or irrelevant. Mark them supported.\n"
+        "3. Not a factual claim at all — narrative or descriptive content (e.g. retelling what "
+        "happens in a story, describing a character), opinion, or summary. Nothing here to "
+        "verify against the web — mark supported.\n\n"
+        "Watch out: a web search for a private/made-up name (e.g. a codename like 'Lumen-8246c6' "
+        "or 'Project Nightingale') often returns results about a completely different, unrelated "
+        "real-world thing that just happens to share part of the name (a real company, product, "
+        "or person). That coincidental-match evidence is NOT relevant evidence — treat it exactly "
+        "the same as finding no evidence at all (case 2 applies: do not flag).\n\n"
+        "Only mark unsupported when it's genuinely case 1 AND the evidence is actually ABOUT the "
+        "same specific subject as the claim, and it contradicts or fails to back it up.\n\n"
+        "Worked examples:\n"
+        '  Claim: "The budget for Project Lumen is $62,841 [1]." Evidence: (no web results found)\n'
+        "  -> supported=true. This is case 2 (an internal project budget) — empty web evidence "
+        "is EXPECTED here, not suspicious, so it is not grounds to flag it.\n"
+        '  Claim: "The budget for Lumen-8246c6 is $35,241 [1]." Evidence: a budgeting app called '
+        '"Lumen" with $13.1M revenue, unrelated to any "Lumen-8246c6".\n'
+        "  -> supported=true. The evidence is about a different, unrelated 'Lumen' that coincidentally "
+        "shares a name — not relevant evidence, so this is still case 2.\n"
+        '  Claim: "Water boils at 100C at sea level [1]." Evidence: confirms 100C.\n'
+        "  -> supported=true. Case 1, evidence backs it up.\n"
+        '  Claim: "The capital of France is Berlin [1]." Evidence: states the capital is Paris.\n'
+        "  -> supported=false. Case 1, evidence directly contradicts the claim.\n\n"
+        "Now judge this one, using ONLY the web evidence below:\n\n"
         f"Claim: {claim}\n\nWeb evidence:\n{evidence_block}"
     )
     result: CitationVerdict = await model.ainvoke(prompt)
