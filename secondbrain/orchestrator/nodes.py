@@ -173,10 +173,21 @@ async def finalize(state: GraphState) -> dict:
         for c in (result.chunks if result.ok else [])
     ]
     last = state["messages"][-1]
+    stub_messages = []
+    if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
+        stub_messages = [
+            ToolMessage(
+                content="skipped: maximum reasoning steps reached",
+                tool_call_id=call["id"],
+                name=call["name"],
+            )
+            for call in last.tool_calls
+        ]
+
     final_answer = last.content if isinstance(last, AIMessage) else ""
     if not final_answer and state["agent_steps"] >= MAX_AGENT_STEPS:
         final_answer = "I wasn't able to finish gathering information in time — please try rephrasing your question."
-    return {"final_answer": final_answer, "citations": chunks}
+    return {"final_answer": final_answer, "citations": chunks, "messages": stub_messages}
 
 
 async def fact_check(state: GraphState) -> dict:

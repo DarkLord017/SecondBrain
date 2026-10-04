@@ -1,6 +1,7 @@
 from secondbrain.chat.events import publish_event
 from secondbrain.config import settings
 from secondbrain.gateway.cache import set_cached
+from secondbrain.gateway.chat_lock import acquire_run_lock, release_run_lock
 from secondbrain.gateway.firewall import redact_pii
 from secondbrain.gateway.spend_cap import settle
 from secondbrain.gateway.tokens import count_tokens, estimate_cost_cents
@@ -20,78 +21,83 @@ async def run_orchestrator_background(
     reservation_key: str,
     reserved_cents: int,
 ) -> None:
-    await runs_store.update_run_status(run_id, "running")
     redis = get_redis()
-
-    graph = build_graph(checkpointer=get_checkpointer())
-    initial_state = {
-        "user_id": user_id,
-        "notebook_id": notebook_id,
-        "question": question,
-        "citations": [],
-    }
-
     thread_id = f"{notebook_id}:{user_id}"
-    config = {
-        "configurable": {"thread_id": thread_id},
-        "callbacks": get_langfuse_callbacks(),
-        "metadata": {
-            "langfuse_session_id": thread_id,
-            "langfuse_user_id": user_id,
-            "run_id": run_id,
-            "notebook_id": notebook_id,
-        },
-    }
 
-    final_text_parts: list[str] = []
-    final_citations: list[dict] = []
-    final_citation_flags: list[dict] = []
-
+    await acquire_run_lock(redis, thread_id)
     try:
-        async for event in graph.astream_events(initial_state, config, version="v2"):
-            if (
-                event["event"] == "on_chat_model_stream"
-                and event.get("metadata", {}).get("langgraph_node") == "agent"
-            ):
-                token = event["data"]["chunk"].content
-                if token:
-                    final_text_parts.append(token)
-                    await publish_event(run_id, {"type": "token", "data": token})
-            if event["event"] == "on_chain_end" and event["name"] == "finalize":
-                final_citations = (event["data"]["output"] or {}).get("citations", [])
-                await publish_event(run_id, {"type": "status", "data": "verifying_citations"})
-            if event["event"] == "on_chain_end" and event["name"] == "fact_check":
-                final_citation_flags = (event["data"]["output"] or {}).get("citation_flags", [])
+        await runs_store.update_run_status(run_id, "running")
 
-        final_answer = redact_pii("".join(final_text_parts))
-        await runs_store.update_run_status(run_id, "done", final_answer=final_answer)
+        graph = build_graph(checkpointer=get_checkpointer())
+        initial_state = {
+            "user_id": user_id,
+            "notebook_id": notebook_id,
+            "question": question,
+            "citations": [],
+        }
 
-        input_tokens = count_tokens(question)
-        output_tokens = count_tokens(final_answer)
-        actual_cents = estimate_cost_cents(
-            input_tokens, output_tokens, settings.price_per_1k_input_tokens, settings.price_per_1k_output_tokens
-        )
-        await settle(redis, reservation_key, reserved_cents, actual_cents)
-        await ledger_store.record(
-            run_id=run_id,
-            notebook_id=notebook_id,
-            user_id=user_id,
-            cost_cents=actual_cents,
-            tokens_in=input_tokens,
-            tokens_out=output_tokens,
-        )
-        await set_cached(
-            redis, notebook_id, question, final_answer, final_citations, final_citation_flags, run_id, settings.cache_ttl_seconds
-        )
-
-        await publish_event(
-            run_id,
-            {
-                "type": "final",
-                "data": {"answer": final_answer, "citations": final_citations, "citation_flags": final_citation_flags},
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "callbacks": get_langfuse_callbacks(),
+            "metadata": {
+                "langfuse_session_id": thread_id,
+                "langfuse_user_id": user_id,
+                "run_id": run_id,
+                "notebook_id": notebook_id,
             },
-        )
-    except Exception as e:  # noqa: BLE001 - must always resolve the run, never hang a WS client
-        await runs_store.update_run_status(run_id, "error", error=str(e))
-        await settle(redis, reservation_key, reserved_cents, 0)
-        await publish_event(run_id, {"type": "error", "data": str(e)})
+        }
+
+        final_text_parts: list[str] = []
+        final_citations: list[dict] = []
+        final_citation_flags: list[dict] = []
+
+        try:
+            async for event in graph.astream_events(initial_state, config, version="v2"):
+                if (
+                    event["event"] == "on_chat_model_stream"
+                    and event.get("metadata", {}).get("langgraph_node") == "agent"
+                ):
+                    token = event["data"]["chunk"].content
+                    if token:
+                        final_text_parts.append(token)
+                        await publish_event(run_id, {"type": "token", "data": token})
+                if event["event"] == "on_chain_end" and event["name"] == "finalize":
+                    final_citations = (event["data"]["output"] or {}).get("citations", [])
+                    await publish_event(run_id, {"type": "status", "data": "verifying_citations"})
+                if event["event"] == "on_chain_end" and event["name"] == "fact_check":
+                    final_citation_flags = (event["data"]["output"] or {}).get("citation_flags", [])
+
+            final_answer = redact_pii("".join(final_text_parts))
+            await runs_store.update_run_status(run_id, "done", final_answer=final_answer)
+
+            input_tokens = count_tokens(question)
+            output_tokens = count_tokens(final_answer)
+            actual_cents = estimate_cost_cents(
+                input_tokens, output_tokens, settings.price_per_1k_input_tokens, settings.price_per_1k_output_tokens
+            )
+            await settle(redis, reservation_key, reserved_cents, actual_cents)
+            await ledger_store.record(
+                run_id=run_id,
+                notebook_id=notebook_id,
+                user_id=user_id,
+                cost_cents=actual_cents,
+                tokens_in=input_tokens,
+                tokens_out=output_tokens,
+            )
+            await set_cached(
+                redis, notebook_id, question, final_answer, final_citations, final_citation_flags, run_id, settings.cache_ttl_seconds
+            )
+
+            await publish_event(
+                run_id,
+                {
+                    "type": "final",
+                    "data": {"answer": final_answer, "citations": final_citations, "citation_flags": final_citation_flags},
+                },
+            )
+        except Exception as e:  # noqa: BLE001 - must always resolve the run, never hang a WS client
+            await runs_store.update_run_status(run_id, "error", error=str(e))
+            await settle(redis, reservation_key, reserved_cents, 0)
+            await publish_event(run_id, {"type": "error", "data": str(e)})
+    finally:
+        await release_run_lock(redis, thread_id)

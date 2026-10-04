@@ -136,6 +136,53 @@ async def test_max_agent_steps_cap_is_respected(monkeypatch):
     assert result["agent_steps"] == nodes.MAX_AGENT_STEPS
     assert "wasn't able to finish" in result["final_answer"]
 
+    # The model's final turn still requested a tool call when the cap hit —
+    # finalize() must close it out with a stub ToolMessage, or this
+    # checkpointed history would break the *next* turn's LLM call (OpenAI
+    # rejects an assistant tool_calls message with no matching response).
+    last_ai = next(m for m in reversed(result["messages"]) if isinstance(m, AIMessage))
+    assert last_ai.tool_calls
+    answered_ids = {
+        m.tool_call_id for m in result["messages"] if m.type == "tool" and getattr(m, "tool_call_id", None)
+    }
+    assert {c["id"] for c in last_ai.tool_calls} <= answered_ids
+
+
+@pytest.mark.asyncio
+async def test_hitting_step_cap_does_not_break_the_next_turn(monkeypatch):
+    """Reproduces the real bug found via live traffic: a run that hits
+    MAX_AGENT_STEPS while the model still wants a tool call used to leave a
+    dangling tool_calls message in the checkpoint, which broke every
+    subsequent turn on that thread with a real OpenAI 400 ("assistant
+    message with tool_calls must be followed by tool messages"). Proven here
+    structurally: turn 2 must be able to call the model at all without the
+    fake model's response_fn ever seeing an invalid history shape.
+    """
+    fake_tool = FakeTool()
+    register(fake_tool)
+
+    def always_calls_tool(messages):
+        count = _tool_message_count(messages)
+        return AIMessage(
+            content="",
+            tool_calls=[{"name": "fake_tool", "args": {"query": "test"}, "id": f"c{count}", "type": "tool_call"}],
+        )
+
+    def answers_plainly(messages):
+        return AIMessage(content="second turn answer")
+
+    checkpointer = MemorySaver()
+    config = {"configurable": {"thread_id": "nb1:u1"}}
+
+    monkeypatch.setattr(nodes, "get_chat_model", lambda: FakeModel(always_calls_tool))
+    graph = build_graph(checkpointer=checkpointer)
+    result1 = await graph.ainvoke({"user_id": "u1", "notebook_id": "nb1", "question": "first"}, config)
+    assert "wasn't able to finish" in result1["final_answer"]
+
+    monkeypatch.setattr(nodes, "get_chat_model", lambda: FakeModel(answers_plainly))
+    result2 = await graph.ainvoke({"user_id": "u1", "notebook_id": "nb1", "question": "second"}, config)
+    assert result2["final_answer"] == "second turn answer"
+
 
 @pytest.mark.asyncio
 async def test_conversation_memory_and_tool_results_reset_across_turns(monkeypatch):
