@@ -1,6 +1,7 @@
 System Design
 
-<img width="3514" height="2192" alt="image" src="https://github.com/user-attachments/assets/4c826d8a-8c0a-4358-bc46-e2f4baad754f" />
+<img width="1288" height="822" alt="image" src="https://github.com/user-attachments/assets/d1aa2f52-c913-492d-b4ec-52a78053160f" />
+
 
 ## Running locally
 
