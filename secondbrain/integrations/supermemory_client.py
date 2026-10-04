@@ -2,6 +2,7 @@
 """
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -38,15 +39,27 @@ async def search(
 
 
 @_retry
-async def write_memory(content: str, container_tag: str, metadata: dict | None = None) -> dict:
+async def write_memory(
+    content: str,
+    container_tag: str,
+    metadata: dict | None = None,
+    forget_after: datetime | None = None,
+    forget_reason: str | None = None,
+) -> dict:
     """Writes to /v4/memories — full memory pipeline (fact extraction, profile
     updates), no taskType support. Use for identity/profile content, not
     reference documents (use add_document / upload_file for those).
     """
+    memory: dict = {"content": content, "metadata": metadata or {}}
+    if forget_after is not None:
+        memory["forgetAfter"] = forget_after.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if forget_reason is not None:
+            memory["forgetReason"] = forget_reason
+
     async with _client() as c:
         resp = await c.post(
             "/v4/memories",
-            json={"memories": [{"content": content, "metadata": metadata or {}}], "containerTag": container_tag},
+            json={"memories": [memory], "containerTag": container_tag},
         )
         resp.raise_for_status()
         body = resp.json()
@@ -107,11 +120,13 @@ async def get_document(document_id: str) -> dict:
         return resp.json()
 
 
-async def write_cache_entry(notebook_id: str, question: str, answer: str, run_id: str) -> None:
+async def write_cache_entry(notebook_id: str, question: str, answer: str, run_id: str, ttl_seconds: int) -> None:
     await write_memory(
         content=f"Q: {question}\nA: {answer}",
         container_tag=f"cache:{notebook_id}",
         metadata={"question": question, "answer": answer, "run_id": run_id},
+        forget_after=datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds),
+        forget_reason="chat answer cache expiry",
     )
 
 

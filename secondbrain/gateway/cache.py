@@ -36,4 +36,4 @@ async def set_cached(
 ) -> None:
     key = cache_key(notebook_id, prompt)
     await r.set(key, json.dumps({"answer": answer, "citations": citations, "citation_flags": citation_flags}), ex=ttl)
-    await supermemory_client.write_cache_entry(notebook_id, prompt, answer, run_id)
+    await supermemory_client.write_cache_entry(notebook_id, prompt, answer, run_id, ttl_seconds=ttl)

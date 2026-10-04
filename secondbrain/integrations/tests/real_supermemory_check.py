@@ -43,7 +43,9 @@ async def main() -> None:
     assert status.get("status") in ("queued", "extracting", "chunking", "embedding", "indexing", "done"), status
     print(f"get_document -> {status.get('status')}")
 
-    await sm.write_cache_entry(notebook_id=tag, question="What is coffee?", answer="A brewed drink.", run_id="r1")
+    await sm.write_cache_entry(
+        notebook_id=tag, question="What is coffee?", answer="A brewed drink.", run_id="r1", ttl_seconds=3600
+    )
     print("write_cache_entry -> ok")
 
     for _ in range(6):
